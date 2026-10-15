@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.2.1 (unreleased)
+
+- The code, tests and examples declare with `scoped` instead of `ad` (ktm v0.24.0 renamed it;
+  v0.25.0 removes `ad`).
+- Needs ktm 0.24.
+
 ## v0.2.0 (2026-10-15)
 
 - EdDSA (Ed25519, RFC 8037), ES384 and ES512 (P-384, P-521), PS256/384/512 (RSA-PSS):

@@ -18,7 +18,7 @@ import "github.com/ozzenerol/ktm-jwt";      // the package is named jwt
 - JWKS from a URL, fetched again when it is old or a token names a key it doesn't have;
   the fetch waits only the coroutine in a `net.http` handler.
 - A `Verifier` is configured once and shared by every thread of a server.
-- Needs ktm 0.23 (crypto's Ed25519, P-384/P-521, RSA-PSS and JWE primitives). Written in
+- Needs ktm 0.24 (`scoped`; crypto's Ed25519, P-384/P-521, RSA-PSS and JWE primitives). Written in
   ktm, on the stdlib's `crypto` (mbedTLS, and Monocypher for Ed25519); nothing else to install.
 
 Get it with `ktm get github.com/ozzenerol/ktm-jwt@v0.2.0`.
@@ -33,7 +33,7 @@ import date, json, reflect, str;
 
 i32 main()
 {
-    ad jwt.Signer *s = jwt.hs256("a secret of 32 bytes or more....");
+    scoped jwt.Signer *s = jwt.hs256("a secret of 32 bytes or more....");
     Claims c;
     c.sub = str.from("42");
     c.exp = date.unixNow() + 3600;
@@ -64,7 +64,7 @@ With a `kid`, the header carries it, so a verifier with several keys knows which
 ## Verifying
 
 ```c
-ad jwt.Verifier *v = jwt.verifier();
+scoped jwt.Verifier *v = jwt.verifier();
 v.hs256("a secret of 32 bytes or more....");
 v.issuer = "https://auth.example.com";      // optional: iss must be this
 v.audience = "api";                         // optional: aud must hold this
@@ -111,7 +111,7 @@ Configure a Verifier before it verifies; after that `verify` can run in many thr
 ## A JWK Set
 
 ```c
-ad jwt.Verifier *v = jwt.verifier();
+scoped jwt.Verifier *v = jwt.verifier();
 v.jwksUrl("https://auth.example.com/.well-known/jwks.json");
 v.issuer = "https://auth.example.com";
 v.audience = "my-api";
@@ -130,10 +130,10 @@ v.audience = "my-api";
 ## Header extensions (crit)
 
 ```c
-ad jwt.Signer *s = jwt.es256(key);
+scoped jwt.Signer *s = jwt.es256(key);
 s.header("tenant", "\"acme\"", true);          // a JSON value; true: listed in "crit"
 
-ad jwt.Verifier *v = jwt.verifier();
+scoped jwt.Verifier *v = jwt.verifier();
 v.es256(key);
 v.understand("tenant");                         // without it, the token is refused
 Claims c = v.verify<Claims>(token);
@@ -149,12 +149,12 @@ isn't supported.
 
 ```c
 // the sender: sign, then encrypt to the recipient's public key
-ad jwt.Signer *s = jwt.es256(myKey);
-ad jwt.Encrypter *e = jwt.rsaOaep256(jwt.Enc.a256gcm, theirKey);
+scoped jwt.Signer *s = jwt.es256(myKey);
+scoped jwt.Encrypter *e = jwt.rsaOaep256(jwt.Enc.a256gcm, theirKey);
 String token = e.encryptToken(s.sign(claims));     // "cty": "JWT"
 
 // the recipient: one Verifier decrypts and checks the signature inside
-ad jwt.Verifier *v = jwt.verifier();
+scoped jwt.Verifier *v = jwt.verifier();
 v.rsaOaep256(myPrivateKey);
 v.es256(sendersKey);
 Claims c = v.verify<Claims>(token);
