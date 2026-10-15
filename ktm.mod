@@ -1,3 +1,3 @@
 module github.com/ozzenerol/ktm-jwt
 
-ktm 0.21
+ktm 0.22

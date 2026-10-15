@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0
+## v0.1.0 (2026-10-15)
 
 The first release: JSON Web Tokens for ktm, written in ktm on the stdlib's `crypto`.
 
