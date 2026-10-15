@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.2.0
+## v0.2.0 (2026-10-15)
 
 - EdDSA (Ed25519, RFC 8037), ES384 and ES512 (P-384, P-521), PS256/384/512 (RSA-PSS):
   Signers, Verifier keys, and JWKS keys (`OKP`/Ed25519, P-384/P-521 curves, `PS*` RSA keys).
