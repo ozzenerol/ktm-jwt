@@ -641,3 +641,51 @@ void testJwksUrl(testing.T *t) {
     k2.free();
     gJwks.free();
 }
+
+/* crit (RFC 7515 4.1.11): extensions the Verifier was told it understands */
+void testCrit(testing.T *t) {
+    ad Signer *s = hs256(SECRET);
+    s.header("tenant", "\"acme\"", true);
+    s.header("hint", "{\"x\":1}");
+    ad Claims c = claims("c", NOW + 60);
+    ad String tok = s.sign(c);
+    ad Verifier *v = verifier();
+    v.hs256(SECRET);
+    v.now = NOW;
+    t.equal(code(v, tok[0:]), ERR_MALFORMED);           /* tenant not understood */
+    v.understand("tenant");
+    t.equal(code(v, tok[0:]), 0);
+    ad String tenant = headerValue(tok[0:], "tenant");
+    ad String hint = headerValue(tok[0:], "hint");
+    ad String none = headerValue(tok[0:], "nothing");
+    t.equal(tenant, "\"acme\"");
+    t.equal(hint, "{\"x\": 1}");                 /* as json.toStr writes it */
+    t.equal(none, "");
+    ad String critText = headerValue(tok[0:], "crit");
+    t.equal(critText, "[\"tenant\"]");
+
+    /* crit's rules, on tokens made by hand */
+    ad String empty = craftHs256("{\"alg\":\"HS256\",\"crit\":[]}", "{\"exp\":1900000000}", SECRET);
+    ad String notList = craftHs256("{\"alg\":\"HS256\",\"crit\":\"tenant\",\"tenant\":1}", "{\"exp\":1900000000}", SECRET);
+    ad String specName = craftHs256("{\"alg\":\"HS256\",\"crit\":[\"kid\"],\"kid\":\"a\"}", "{\"exp\":1900000000}", SECRET);
+    ad String absent = craftHs256("{\"alg\":\"HS256\",\"crit\":[\"tenant\"]}", "{\"exp\":1900000000}", SECRET);
+    ad String b64 = craftHs256("{\"alg\":\"HS256\",\"crit\":[\"b64\"],\"b64\":false}", "{\"exp\":1900000000}", SECRET);
+    ad String fine = craftHs256("{\"alg\":\"HS256\",\"crit\":[\"tenant\"],\"tenant\":1}", "{\"exp\":1900000000}", SECRET);
+    t.equal(code(v, empty[0:]), ERR_MALFORMED);
+    t.equal(code(v, notList[0:]), ERR_MALFORMED);
+    t.equal(code(v, specName[0:]), ERR_MALFORMED);
+    t.equal(code(v, absent[0:]), ERR_MALFORMED);
+    t.equal(code(v, b64[0:]), ERR_MALFORMED);
+    t.equal(code(v, fine[0:]), 0);
+
+    /* what header() and understand() refuse */
+    bool threw = false;
+    try { s.header("alg", "\"none\""); } catch (Error e) { threw = e.code == ERR_MALFORMED; }
+    t.check(threw, "header(\"alg\") throws");
+    threw = false;
+    try { s.header("x", "not json"); } catch (Error e) { threw = e.code == ERR_MALFORMED; }
+    t.check(threw, "a value that isn't JSON throws");
+    threw = false;
+    try { v.understand("b64"); } catch (Error e) { threw = e.code == ERR_MALFORMED; }
+    t.check(threw, "understand(\"b64\") throws");
+}

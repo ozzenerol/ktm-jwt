@@ -123,7 +123,20 @@ pub struct Signer {
     private String kid;
     private String secret;          /* HS: a copy */
     private crypto.Key *key;        /* ES, RS: the caller's */
+    private String extra;           /* header(): ,"name":value ... */
+    private String crit;            /* the critical ones: "name","name" */
 };
+
+/* Header names the JOSE specs define (RFC 7515, 7516, 7518, 7797): not
+ * for header(), and never listed in crit */
+static bool registeredHeader(u8[] name) {
+    u8 *names[21] = {"alg", "jku", "jwk", "kid", "x5u", "x5c", "x5t", "x5t#S256", "typ", "cty", "crit",
+                     "enc", "zip", "epk", "apu", "apv", "iv", "tag", "p2s", "p2c", "b64"};
+    for (i64 i = 0; i < 21; i++) {
+        if (str.equals(name, cstrView(names[i]))) { return true; }
+    }
+    return false;
+}
 
 static Signer *signerNew(Alg a, u8[] secret, crypto.Key *key, u8[] kid) {
     Signer *s = mem.allocZero(sizeof(Signer));
@@ -204,6 +217,12 @@ static String signJson(Signer *s, u8[] payload) {
         head.append(",\"kid\":");
         json.quoteTo(&head, s.kid[0:]);
     }
+    head.append(s.extra[0:]);
+    if (s.crit.len) {
+        head.append(",\"crit\":[");
+        head.append(s.crit[0:]);
+        head.append("]");
+    }
     head.append("}");
     String token = base64.encodeUrl(head[0:]);
     head.free();
@@ -237,9 +256,34 @@ pub String Signer.sign<T>(T claims) {
     return token;
 }
 
+/* One more header member: name (not one the specs define) with value,
+ * JSON text ("1", "\"text\"", "{...}"); critical lists it in "crit",
+ * so a verifier that doesn't understand it refuses the token (RFC 7515
+ * 4.1.11). Throws ERR_MALFORMED for a defined name or a value that isn't
+ * JSON. */
+pub void Signer.header(u8[] name, u8[] value, bool critical = false) {
+    if (!name.len || registeredHeader(name)) {
+        throw(ERR_MALFORMED, "jwt: \"%.*s\" isn't a header of its own to add", name.len, name.ptr);
+    }
+    json.Value *j = json.parse(value);
+    bool ok = j && json.ok(j);
+    if (j) { json.release(j); }
+    if (!ok) { throw(ERR_MALFORMED, "jwt: the value of header %.*s isn't JSON", name.len, name.ptr); }
+    self.extra.append(",");
+    json.quoteTo(&self.extra, name);
+    self.extra.append(":");
+    self.extra.append(value);
+    if (critical) {
+        if (self.crit.len) { self.crit.append(","); }
+        json.quoteTo(&self.crit, name);
+    }
+}
+
 pub void Signer.free() {
     if (!self) { return; }
     self.kid.free();
+    self.extra.free();
+    self.crit.free();
     for (i64 i = 0; i < self.secret.len; i++) { self.secret.ptr[i] = 0; }
     self.secret.free();
     mem.free(self);
@@ -360,6 +404,7 @@ pub struct Verifier {
     private i64 fetchedMs;          /* when they were fetched (date.monoMs) */
     private bool fetching;
     private libc.pthread_mutex_t lock;
+    private vec.Vec<String> understood;    /* understand(): crit names it takes */
 };
 
 /* A Verifier that trusts no key yet, with the defaults: 60 s leeway,
@@ -370,6 +415,7 @@ pub Verifier *verifier() {
     v.requireExp = true;
     v.jwksRetrySec = 60;
     v.keys = vec.new<VKey *>();
+    v.understood = vec.new<String>();
     libc.pthread_mutex_init(&v.lock);
     return v;
 }
@@ -706,6 +752,44 @@ static void checkClaims(Verifier *v, json.Value *c) {
     }
 }
 
+/* Header extensions the application handles, as a token's "crit" lists
+ * them (RFC 7515 4.1.11): a token whose crit names one not understood is
+ * refused (ERR_MALFORMED). Read their values with jwt.headerValue. Not
+ * for the names the specs define, "b64" (RFC 7797, unencoded payloads)
+ * among them. */
+pub void Verifier.understand(u8[] name) {
+    if (!name.len || registeredHeader(name)) {
+        throw(ERR_MALFORMED, "jwt: \"%.*s\" is a header this package handles itself", name.len, name.ptr);
+    }
+    self.understood.push(str.from(name));
+}
+
+/* a token's crit: a list of names, each understood, none the specs
+ * define, each in the header; throws ERR_MALFORMED */
+static void checkCrit(Verifier *v, json.Value *h, json.Value *crit) {
+    if (!json.isArray(crit) || json.len(crit) == 0) {
+        throw(ERR_MALFORMED, "jwt: crit is a list of header names");
+    }
+    for (i64 i = 0; i < json.len(crit); i++) {
+        json.Value *c = json.arrayGet(crit, i);
+        if (!c || !json.isString(c)) { throw(ERR_MALFORMED, "jwt: crit is a list of header names"); }
+        if (registeredHeader(c.str)) {
+            throw(ERR_MALFORMED, "jwt: crit can't list %.*s, a header the specs define", c.str.len, c.str.ptr);
+        }
+        bool known = false;
+        for (i64 k = 0; k < v.understood.len && !known; k++) {
+            String *u = v.understood.at(k);
+            known = str.equals(u.ptr[0:u.len], c.str);
+        }
+        if (!known) {
+            throw(ERR_MALFORMED, "jwt: the token needs header %.*s understood (crit)", c.str.len, c.str.ptr);
+        }
+        if (!json.objectGet(h, c.str)) {
+            throw(ERR_MALFORMED, "jwt: crit lists %.*s, which the header hasn't", c.str.len, c.str.ptr);
+        }
+    }
+}
+
 /* token verified: its alg, signature and claims; *p holds its parts
  * (partsFree), throws ERR_* */
 static void verifyParts(Verifier *v, u8[] token, Parts *p) {
@@ -714,7 +798,8 @@ static void verifyParts(Verifier *v, u8[] token, Parts *p) {
     try {
         h = object(p.head[0:]);
         if (!h) { throw(ERR_MALFORMED, "jwt: the header isn't a JSON object"); }
-        if (json.objectGet(h, "crit")) { throw(ERR_MALFORMED, "jwt: a \"crit\" header isn't supported"); }
+        json.Value *crit = json.objectGet(h, "crit");
+        if (crit) { checkCrit(v, h, crit); }
         bool bad = false;
         u8[] algText = member(h, "alg", &bad);
         u8[] kid = member(h, "kid", &bad);
@@ -784,6 +869,21 @@ pub Header header(u8[] token) {
     return h;
 }
 
+/* The JSON text of a header member of token, as json.toStr writes it
+ * ("" when it has none), NOT verified: read it after verify, as for a
+ * crit extension. Throws ERR_MALFORMED. A new String (yours). */
+pub String headerValue(u8[] token, u8[] name) {
+    Parts p;
+    split(token, &p);
+    json.Value *h = object(p.head[0:]);
+    partsFree(&p);
+    if (!h) { throw(ERR_MALFORMED, "jwt: the header isn't a JSON object"); }
+    json.Value *m = json.objectGet(h, name);
+    String out = m ? json.toStr(m) : str.from("");
+    json.release(h);
+    return out;
+}
+
 /* A token's claims, NOT verified: for debugging only, never to trust */
 pub T decodeUnverified<T>(u8[] token) {
     Parts p;
@@ -801,6 +901,8 @@ pub T decodeUnverified<T>(u8[] token) {
 
 pub void Verifier.free() {
     if (!self) { return; }
+    for (i64 i = 0; i < self.understood.len; i++) { self.understood.at(i).free(); }
+    self.understood.free();
     for (i64 i = 0; i < self.keys.len; i++) { vkeyFree(self.keys.get(i)); }
     self.keys.free();
     if (self.remote) { releaseSet(self, self.remote); }
