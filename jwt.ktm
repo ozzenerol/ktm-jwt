@@ -32,6 +32,8 @@ pub const i64 ERR_KEY       = 0x6A770007;  /* no key for the token's kid, a bad 
     String alg;
     String typ;
     String kid;
+    String enc;         /* a JWE's content encryption */
+    String cty;         /* "JWT" when a JWE holds a signed token */
 };
 
 enum Alg { hs256, hs384, hs512, es256, rs256, rs384, rs512, es384, es512, ps256, ps384, ps512, eddsa };
@@ -364,6 +366,8 @@ struct VKey {
     String secret;          /* HS: a copy */
     crypto.Key *key;        /* ES, RS */
     bool owned;             /* key is ours (from a JWK) */
+    bool jwe;               /* a key to decrypt with (jwe.ktm), not to verify */
+    KAlg kalg;              /* and how */
 };
 
 static void vkeyFree(VKey *k) {
@@ -397,6 +401,8 @@ pub struct Verifier {
     bool requireExp;    /* a token without exp is refused (verifier(): true) */
     i64 now;            /* the time in Unix seconds (0: the clock); for tests */
     i64 jwksRetrySec;   /* an unknown kid refetches the JWKS at most this often (verifier(): 60) */
+    bool allowUnsignedJwe;  /* take a JWE made with a public key (RSA-OAEP-256, ECDH-ES) that holds
+                             * claims, not a signed token: anyone can make one (false) */
     private vec.Vec<VKey *> keys;   /* given: hs256(), jwks(), ... */
     private String url;             /* jwksUrl() */
     private i64 refreshMs;
@@ -667,6 +673,7 @@ static bool tryKeys(vec.Vec<VKey *> *keys, Alg a, u8[] kid, Parts *p, u8[] signe
                     bool *found, bool *kidSeen) {
     for (i64 i = 0; i < keys.len; i++) {
         VKey *k = keys.get(i);
+        if (k.jwe) { continue; }
         if (kid.len && !str.equals(k.kid[0:], kid)) { continue; }
         if (kid.len) { *kidSeen = true; }
         if (k.alg != a) { continue; }
@@ -793,6 +800,10 @@ static void checkCrit(Verifier *v, json.Value *h, json.Value *crit) {
 /* token verified: its alg, signature and claims; *p holds its parts
  * (partsFree), throws ERR_* */
 static void verifyParts(Verifier *v, u8[] token, Parts *p) {
+    if (countDots(token) == 4) {
+        verifyJwe(v, token, p);       /* encrypted (jwe.ktm) */
+        return;
+    }
     split(token, p);
     json.Value *h = null, *c = null;
     try {
@@ -853,30 +864,36 @@ pub bool Verifier.valid(u8[] token) {
     return true;
 }
 
-/* A token's header, NOT verified: to choose a key or to log. Throws
+/* A token's header (a JWS's or a JWE's), NOT verified: to choose a key
+ * or to log. Throws
  * ERR_MALFORMED. Free it with json.free(reflect.of(h)). */
 pub Header header(u8[] token) {
-    Parts p;
-    split(token, &p);
+    ad String text = headText(token);
     Header h;
     try {
-        h = json.decode<Header>(p.head[0:]);
+        h = json.decode<Header>(text[0:]);
     } catch (Error e) {
-        partsFree(&p);
         throw(ERR_MALFORMED, "jwt: the header: %s", e.message);
     }
-    partsFree(&p);
     return h;
+}
+
+/* the header of a JWS or a JWE, decoded; throws ERR_MALFORMED */
+static String headText(u8[] token) {
+    i64 dots = countDots(token);
+    if (dots != 2 && dots != 4) { throw(ERR_MALFORMED, "jwt: a token has three parts (or five, encrypted)"); }
+    i64 at = str.find(token, ".");
+    String out;
+    if (!at || !b64url(token[0:at], &out)) { throw(ERR_MALFORMED, "jwt: the header isn't unpadded base64url"); }
+    return out;
 }
 
 /* The JSON text of a header member of token, as json.toStr writes it
  * ("" when it has none), NOT verified: read it after verify, as for a
  * crit extension. Throws ERR_MALFORMED. A new String (yours). */
 pub String headerValue(u8[] token, u8[] name) {
-    Parts p;
-    split(token, &p);
-    json.Value *h = object(p.head[0:]);
-    partsFree(&p);
+    ad String text = headText(token);
+    json.Value *h = object(text[0:]);
     if (!h) { throw(ERR_MALFORMED, "jwt: the header isn't a JSON object"); }
     json.Value *m = json.objectGet(h, name);
     String out = m ? json.toStr(m) : str.from("");
