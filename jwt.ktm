@@ -9,13 +9,13 @@ import _ = net.https;           /* https:// JWKS URLs (a blank import: for what 
  *
  *   @json struct Claims { String sub; i64 exp; };
  *
- *   ad jwt.Signer *s = jwt.hs256("a secret of 32 bytes or more....");
+ *   scoped jwt.Signer *s = jwt.hs256("a secret of 32 bytes or more....");
  *   Claims c;
  *   c.sub = str.from("42");
  *   c.exp = date.unixNow() + 3600;
  *   String token = s.sign(c);
  *
- *   ad jwt.Verifier *v = jwt.verifier();
+ *   scoped jwt.Verifier *v = jwt.verifier();
  *   v.hs256("a secret of 32 bytes or more....");
  *   Claims back = v.verify<Claims>(token);   // throws jwt.ERR_* */
 
@@ -573,7 +573,7 @@ static KeySet *jwksGet(Verifier *v, String *why) {
         http.Headers h;
         defer h.free();
         h.add("Connection", "close");
-        ad http.Response r = http.request("GET", v.url[0:], "", &h, &o);
+        scoped http.Response r = http.request("GET", v.url[0:], "", &h, &o);
         if (r.status != 200) { throw(ERR_KEY, "jwt: the JWKS at %.*s answered %d", v.url.len, v.url.ptr, r.status); }
         jwksParse(r.body[0:], &s.keys);
     } catch (Error e) {
@@ -596,7 +596,7 @@ pub void Verifier.jwksUrl(u8[] url, i64 refreshSec = 3600) {
     String why;
     KeySet *s = jwksGet(self, &why);
     if (!s) {
-        ad String msg = why;
+        scoped String msg = why;
         throw(ERR_KEY, "%.*s", msg.len, msg.ptr);
     }
     libc.pthread_mutex_lock(&self.lock);
@@ -868,7 +868,7 @@ pub bool Verifier.valid(u8[] token) {
  * or to log. Throws
  * ERR_MALFORMED. Free it with json.free(reflect.of(h)). */
 pub Header header(u8[] token) {
-    ad String text = headText(token);
+    scoped String text = headText(token);
     Header h;
     try {
         h = json.decode<Header>(text[0:]);
@@ -892,7 +892,7 @@ static String headText(u8[] token) {
  * ("" when it has none), NOT verified: read it after verify, as for a
  * crit extension. Throws ERR_MALFORMED. A new String (yours). */
 pub String headerValue(u8[] token, u8[] name) {
-    ad String text = headText(token);
+    scoped String text = headText(token);
     json.Value *h = object(text[0:]);
     if (!h) { throw(ERR_MALFORMED, "jwt: the header isn't a JSON object"); }
     json.Value *m = json.objectGet(h, name);

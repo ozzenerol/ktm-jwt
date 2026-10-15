@@ -24,7 +24,7 @@ i64 jweCode(Verifier *v, u8[] token) {
 }
 
 String fixture(u8 *name) {
-    ad String text = file(name);
+    scoped String text = file(name);
     return str.from(str.trimEnd(text[0:]));
 }
 
@@ -76,9 +76,9 @@ crypto.Key *ecPrivate(u8[] d, u8[] x, u8[] y) {
     base64.decode(y, &b);
     der.append(b[0:]);
     b.free();
-    ad String body = base64.encode(der[0:]);
+    scoped String body = base64.encode(der[0:]);
     der.free();
-    ad String pem = str.format("-----BEGIN EC PRIVATE KEY-----\n%.*s\n-----END EC PRIVATE KEY-----\n", body.len,
+    scoped String pem = str.format("-----BEGIN EC PRIVATE KEY-----\n%.*s\n-----END EC PRIVATE KEY-----\n", body.len,
                                body.ptr);
     return crypto.privateKey(pem[0:]);
 }
@@ -93,9 +93,9 @@ void testRfc7518C(testing.T *t) {
     base64.decode("weNJy2HscCSM6AEDTDg04biOvhFhyyWvOHQfeF_PxMQ", &bx);
     base64.decode("e8lnCO-AlStT-NJVX-crhB7QRYhiix03illJOVAOyck", &by);
     crypto.Key *bob = crypto.ecPublicKey(bx[0:], by[0:]);
-    ad String z = alice.ecdh(bob);
-    ad String k = concatKdf(z[0:], 16, "A128GCM", "Alice", "Bob");
-    ad String k64 = base64.encodeUrl(k[0:]);
+    scoped String z = alice.ecdh(bob);
+    scoped String k = concatKdf(z[0:], 16, "A128GCM", "Alice", "Bob");
+    scoped String k64 = base64.encodeUrl(k[0:]);
     t.equal(k64, "VqqN6vgjbSBcIijNcacQGg");
     alice.free();
     bob.free();
@@ -105,10 +105,10 @@ void testRfc7518C(testing.T *t) {
 
 /* tokens Python's cryptography made decrypt here */
 void testPythonTokens(testing.T *t) {
-    ad String rsaPem = file("rsa-key.pem");
-    ad String ecPem = file("ec-key.pem");
-    ad String ec384Pem = file("ec384-key.pem");
-    ad String rsaPub = file("rsa-pub.pem");
+    scoped String rsaPem = file("rsa-key.pem");
+    scoped String ecPem = file("ec-key.pem");
+    scoped String ec384Pem = file("ec384-key.pem");
+    scoped String rsaPub = file("rsa-pub.pem");
     crypto.Key *rsa = crypto.privateKey(rsaPem[0:]);
     crypto.Key *ec = crypto.privateKey(ecPem[0:]);
     crypto.Key *e384 = crypto.privateKey(ec384Pem[0:]);
@@ -116,7 +116,7 @@ void testPythonTokens(testing.T *t) {
     u8 kek[32], d128[16];
     for (i64 i = 0; i < 32; i++) { kek[i] = (u8)i; }
     for (i64 i = 0; i < 16; i++) { d128[i] = (u8)(100 + i); }
-    ad Verifier *v = verifier();
+    scoped Verifier *v = verifier();
     v.allowUnsignedJwe = true;
     v.rsaOaep256(rsa);
     v.ecdhEsA128kw(ec, "e1");
@@ -127,18 +127,18 @@ void testPythonTokens(testing.T *t) {
     u8 *files[5] = {"jwe-rsa-oaep-256.A256GCM.txt", "jwe-ECDH-ES+A128KW.A128CBC-HS256.txt",
                     "jwe-ECDH-ES.A256GCM.p384.apu.txt", "jwe-A256KW.A256CBC-HS512.txt", "jwe-dir.A128GCM.txt"};
     for (i64 i = 0; i < 5; i++) {
-        ad String tok = fixture(files[i]);
+        scoped String tok = fixture(files[i]);
         Py c = v.verify<Py>(tok[0:]);
         t.check(str.equals(c.sub[0:], "py") && c.exp == 4102444800, "%s", files[i]);
         json.free(reflect.of(c));
     }
     /* the nested one: openssl's RS256 token inside */
-    ad String nested = fixture("jwe-nested.rsa-oaep-256.A128GCM.txt");
+    scoped String nested = fixture("jwe-nested.rsa-oaep-256.A128GCM.txt");
     v.issuer = "https://issuer.example";
     Ext e = v.verify<Ext>(nested[0:]);
     t.check(str.equals(e.sub[0:], "ext"), "nested: the signed token's claims");
     json.free(reflect.of(e));
-    ad Header h = header(nested[0:]);
+    scoped Header h = header(nested[0:]);
     t.equal(h.alg, "RSA-OAEP-256");
     t.equal(h.enc, "A128GCM");
     t.equal(h.cty, "JWT");
@@ -167,21 +167,21 @@ Encrypter *encFor(i64 a, Enc e, Verifier *v, crypto.Key *rsa, crypto.Key *ec) {
 
 /* every alg with every enc: claims, and a signed token inside */
 void testJweRoundTrips(testing.T *t) {
-    ad String rsaPem = file("rsa-key.pem");
+    scoped String rsaPem = file("rsa-key.pem");
     crypto.Key *rsa = crypto.privateKey(rsaPem[0:]);
     crypto.Key *ec = crypto.generateKey();
-    ad Signer *signer = hs256(SECRET);
-    ad Claims c = claims("j", NOW + 60);
-    ad String jws = signer.sign(c);
+    scoped Signer *signer = hs256(SECRET);
+    scoped Claims c = claims("j", NOW + 60);
+    scoped String jws = signer.sign(c);
     for (i64 a = 0; a < 8; a++) {
         for (i64 ei = 0; ei <= (i64)Enc.a256cbcHs512; ei++) {
             Enc e = (Enc)ei;
-            ad Verifier *v = verifier();
+            scoped Verifier *v = verifier();
             v.now = NOW;
             v.hs256(SECRET);
             Encrypter *x = encFor(a, e, v, rsa, ec);
-            ad String tok = x.encrypt(c);
-            ad String nested = x.encryptToken(jws[0:]);
+            scoped String tok = x.encrypt(c);
+            scoped String nested = x.encryptToken(jws[0:]);
             t.check(countDots(tok[0:]) == 4, "five parts");
             i64 got = code(v, tok[0:]);
             /* claims alone: only by a shared key */
@@ -204,12 +204,12 @@ void testJweRoundTrips(testing.T *t) {
 void testJweTampered(testing.T *t) {
     u8 key[32];
     for (i64 i = 0; i < 32; i++) { key[i] = (u8)i; }
-    ad Encrypter *x = a256kw(Enc.a256gcm, key[0:32]);
-    ad Verifier *v = verifier();
+    scoped Encrypter *x = a256kw(Enc.a256gcm, key[0:32]);
+    scoped Verifier *v = verifier();
     v.a256kw(key[0:32]);
     v.now = NOW;
-    ad Claims c = claims("t", NOW + 60);
-    ad String tok = x.encrypt(c);
+    scoped Claims c = claims("t", NOW + 60);
+    scoped String tok = x.encrypt(c);
     t.equal(code(v, tok[0:]), 0);
     i64 at[4];
     i64 n = 0;
@@ -227,7 +227,7 @@ void testJweTampered(testing.T *t) {
         bad.free();
     }
     /* the header swapped for another valid one: the AAD differs */
-    ad String head2 = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"x\":1}");
+    scoped String head2 = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"x\":1}");
     String swapped = str.from(head2[0:]);
     swapped.append(tok[at[0]:]);
     t.equal(code(v, swapped[0:]), ERR_SIGNATURE);
@@ -235,7 +235,7 @@ void testJweTampered(testing.T *t) {
     /* another key */
     u8 other[32];
     for (i64 i = 0; i < 32; i++) { other[i] = (u8)(i + 1); }
-    ad Verifier *w = verifier();
+    scoped Verifier *w = verifier();
     w.a256kw(other[0:32]);
     w.now = NOW;
     t.equal(code(w, tok[0:]), ERR_SIGNATURE);
@@ -245,21 +245,21 @@ void testJweTampered(testing.T *t) {
 void testJweRefused(testing.T *t) {
     u8 key[32];
     for (i64 i = 0; i < 32; i++) { key[i] = (u8)i; }
-    ad Verifier *v = verifier();
+    scoped Verifier *v = verifier();
     v.a256kw(key[0:32], "k1");
     v.now = NOW;
     /* zip, an unknown enc, an unknown alg, RSA1_5 */
-    ad String zip = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"zip\":\"DEF\"}");
-    ad String enc = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A128GCMKW\"}");
-    ad String rsa15 = base64.encodeUrl("{\"alg\":\"RSA1_5\",\"enc\":\"A256GCM\"}");
-    ad String nokey = base64.encodeUrl("{\"alg\":\"A128KW\",\"enc\":\"A256GCM\"}");
-    ad String kid = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"kid\":\"zz\"}");
+    scoped String zip = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"zip\":\"DEF\"}");
+    scoped String enc = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A128GCMKW\"}");
+    scoped String rsa15 = base64.encodeUrl("{\"alg\":\"RSA1_5\",\"enc\":\"A256GCM\"}");
+    scoped String nokey = base64.encodeUrl("{\"alg\":\"A128KW\",\"enc\":\"A256GCM\"}");
+    scoped String kid = base64.encodeUrl("{\"alg\":\"A256KW\",\"enc\":\"A256GCM\",\"kid\":\"zz\"}");
     u8 *tail = ".AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA.AAAAAAAAAAAAAAAA.AAAA.AAAAAAAAAAAAAAAAAAAAAA";
-    ad String t1 = str.format("%.*s%s", zip.len, zip.ptr, tail);
-    ad String t2 = str.format("%.*s%s", enc.len, enc.ptr, tail);
-    ad String t3 = str.format("%.*s%s", rsa15.len, rsa15.ptr, tail);
-    ad String t4 = str.format("%.*s%s", nokey.len, nokey.ptr, tail);
-    ad String t5 = str.format("%.*s%s", kid.len, kid.ptr, tail);
+    scoped String t1 = str.format("%.*s%s", zip.len, zip.ptr, tail);
+    scoped String t2 = str.format("%.*s%s", enc.len, enc.ptr, tail);
+    scoped String t3 = str.format("%.*s%s", rsa15.len, rsa15.ptr, tail);
+    scoped String t4 = str.format("%.*s%s", nokey.len, nokey.ptr, tail);
+    scoped String t5 = str.format("%.*s%s", kid.len, kid.ptr, tail);
     t.equal(code(v, t1[0:]), ERR_ALG);
     t.equal(code(v, t2[0:]), ERR_ALG);
     t.equal(code(v, t3[0:]), ERR_ALG);
@@ -271,28 +271,28 @@ void testJweRefused(testing.T *t) {
     /* an epk on another curve than the key */
     crypto.Key *p256 = crypto.generateKey();
     crypto.Key *p384 = crypto.generateKey(crypto.KeyKind.ec384);
-    ad Encrypter *x = ecdhEs(Enc.a128gcm, p384);
-    ad Verifier *w = verifier();
+    scoped Encrypter *x = ecdhEs(Enc.a128gcm, p384);
+    scoped Verifier *w = verifier();
     w.ecdhEs(p256);
     w.allowUnsignedJwe = true;
     w.now = NOW;
-    ad Claims c = claims("e", NOW + 60);
-    ad String tok = x.encrypt(c);
+    scoped Claims c = claims("e", NOW + 60);
+    scoped String tok = x.encrypt(c);
     t.equal(code(w, tok[0:]), ERR_KEY);
 
     /* claims inside are checked as a signed token's */
-    ad Encrypter *y = a256kw(Enc.a128gcm, key[0:32]);
-    ad Claims old = claims("o", NOW - 3600);
-    ad String expired = y.encrypt(old);
+    scoped Encrypter *y = a256kw(Enc.a128gcm, key[0:32]);
+    scoped Claims old = claims("o", NOW - 3600);
+    scoped String expired = y.encrypt(old);
     t.equal(code(v, expired[0:]), ERR_EXPIRED);
     /* a nested token signed with a key the Verifier doesn't trust */
-    ad Signer *s = hs256("not the verifier's secret, 32 b.");
-    ad String jws = s.sign(c);
-    ad String nested = y.encryptToken(jws[0:]);
+    scoped Signer *s = hs256("not the verifier's secret, 32 b.");
+    scoped String jws = s.sign(c);
+    scoped String nested = y.encryptToken(jws[0:]);
     v.hs256(SECRET);
     t.equal(code(v, nested[0:]), ERR_SIGNATURE);
     /* a nested "token" that isn't a JWS */
-    ad String notJws = y.encryptToken("{\"sub\":\"x\"}");
+    scoped String notJws = y.encryptToken("{\"sub\":\"x\"}");
     t.equal(code(v, notJws[0:]), ERR_MALFORMED);
 
     /* wrong sizes and kinds */
@@ -311,24 +311,24 @@ void testJweRefused(testing.T *t) {
 
 /* jwksKey: the recipient's key from their JWKS, use "enc" too */
 void testJwksKey(testing.T *t) {
-    ad String text = file("jwks.json");
+    scoped String text = file("jwks.json");
     crypto.Key *enc1 = jwksKey(text[0:], "enc1");        /* RSA, "use": "enc" */
     crypto.Key *e384 = jwksKey(text[0:], "ec384");
     crypto.Key *ed = jwksKey(text[0:], "ed1");
     t.check(enc1.kind() == crypto.KeyKind.rsa && e384.kind() == crypto.KeyKind.ec384 &&
             ed.kind() == crypto.KeyKind.ed25519, "keys of three kinds");
     /* encrypt to it; the private key decrypts */
-    ad String rsaPem = file("rsa-key.pem");
+    scoped String rsaPem = file("rsa-key.pem");
     crypto.Key *priv = crypto.privateKey(rsaPem[0:]);
-    ad Encrypter *x = rsaOaep256(Enc.a256gcm, enc1);
-    ad Verifier *v = verifier();
+    scoped Encrypter *x = rsaOaep256(Enc.a256gcm, enc1);
+    scoped Verifier *v = verifier();
     v.rsaOaep256(priv);
     v.hs256(SECRET);
     v.now = NOW;
-    ad Signer *s = hs256(SECRET);
-    ad Claims c = claims("k", NOW + 60);
-    ad String jws = s.sign(c);
-    ad String tok = x.encryptToken(jws[0:]);
+    scoped Signer *s = hs256(SECRET);
+    scoped Claims c = claims("k", NOW + 60);
+    scoped String jws = s.sign(c);
+    scoped String tok = x.encryptToken(jws[0:]);
     t.equal(code(v, tok[0:]), 0);
     bool threw = false;
     try { crypto.Key *k = jwksKey(text[0:], "nope"); k.free(); } catch (Error e) { threw = e.code == ERR_KEY; }

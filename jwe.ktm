@@ -6,7 +6,7 @@ import crypto, encoding.base64, json, mem, reflect, str;
  * ECDH-ES, ECDH-ES+A128KW, ECDH-ES+A256KW and content encryption A128GCM,
  * A192GCM, A256GCM, A128CBC-HS256, A192CBC-HS384, A256CBC-HS512.
  *
- *   ad jwt.Encrypter *e = jwt.rsaOaep256(jwt.Enc.a256gcm, theirPublicKey);
+ *   scoped jwt.Encrypter *e = jwt.rsaOaep256(jwt.Enc.a256gcm, theirPublicKey);
  *   String token = e.encryptToken(signedToken);     // a JWS inside
  *
  *   v.rsaOaep256(myPrivateKey);                      // the Verifier decrypts
