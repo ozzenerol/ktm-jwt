@@ -1,0 +1,38 @@
+{
+ "keys": [
+  {
+   "kty": "RSA",
+   "kid": "rsa1",
+   "use": "sig",
+   "alg": "RS256",
+   "n": "nz-zfgyqBoPXyroZiP9bPoscrkG8E-zN0_8JLhWKdS_5JfbAvZ0iYV2Mgf45tpkLLjBJTeK1A1tgz3yVwaqzcEdqH9zqIVYmzezMyEL2IlWkPy6OxXqTZ0pJYJut8qkue9PFM7BtfofQ1vtlWtVslDIpIM7n_PXLJZ68lanFIIw463XUiEEGjHZbnEtDWCemoLHNtvhglQVaKp_nQy6NHIgpDgriBFK6pWaGrfvk-XbIFav0rxHcVhKM36vtf9WFAYF-YFdltizeFkhRSsmOop_cfUfkGOSY9mRQsRJE-jb3gMrHTc9aoAG9DefT4hsZ7JET_GOWUKf8Z4GklmMRQQ",
+   "e": "AQAB"
+  },
+  {
+   "kty": "EC",
+   "kid": "ec1",
+   "crv": "P-256",
+   "x": "FPFnguHlpS7zy8UfTSB_0PHYgz8dGCC8LNr9S1d8aD8",
+   "y": "AmjCbD7nsTVeenbQVYV7NhGirsXkG6ZF2aGqJ7tcmMw"
+  },
+  {
+   "kty": "oct",
+   "kid": "sym",
+   "k": "c2VjcmV0"
+  },
+  {
+   "kty": "EC",
+   "kid": "p384",
+   "crv": "P-384",
+   "x": "AA",
+   "y": "AA"
+  },
+  {
+   "kty": "RSA",
+   "kid": "enc1",
+   "use": "enc",
+   "n": "nz-zfgyqBoPXyroZiP9bPoscrkG8E-zN0_8JLhWKdS_5JfbAvZ0iYV2Mgf45tpkLLjBJTeK1A1tgz3yVwaqzcEdqH9zqIVYmzezMyEL2IlWkPy6OxXqTZ0pJYJut8qkue9PFM7BtfofQ1vtlWtVslDIpIM7n_PXLJZ68lanFIIw463XUiEEGjHZbnEtDWCemoLHNtvhglQVaKp_nQy6NHIgpDgriBFK6pWaGrfvk-XbIFav0rxHcVhKM36vtf9WFAYF-YFdltizeFkhRSsmOop_cfUfkGOSY9mRQsRJE-jb3gMrHTc9aoAG9DefT4hsZ7JET_GOWUKf8Z4GklmMRQQ",
+   "e": "AQAB"
+  }
+ ]
+}
