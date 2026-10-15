@@ -668,3 +668,38 @@ static i64 countDots(u8[] s) {
     }
     return n;
 }
+
+/* The public key with kid in a JWK Set (JSON text), whatever its "use"
+ * and "alg": to encrypt to its owner (RSA-OAEP-256, ECDH-ES). Yours to
+ * free. Throws ERR_KEY when there is none, or it isn't EC (P-256, P-384,
+ * P-521), RSA or Ed25519. */
+pub crypto.Key *jwksKey(u8[] text, u8[] kid) {
+    json.Value *j = object(text);
+    if (!j) { throw(ERR_KEY, "jwt: a JWKS is a JSON object"); }
+    json.Value *keys = json.objectGet(j, "keys");
+    crypto.Key *found = null;
+    for (i64 i = 0; keys && json.isArray(keys) && i < json.len(keys) && !found; i++) {
+        json.Value *k = json.arrayGet(keys, i);
+        bool bad = false;
+        if (!k || !json.isObject(k) || !str.equals(member(k, "kid", &bad), kid)) { continue; }
+        u8[] kty = member(k, "kty", &bad);
+        String p1, p2;
+        try {
+            if (str.equals(kty, "EC") && jwkBytes(k, "x", &p1) && jwkBytes(k, "y", &p2)) {
+                found = crypto.ecPublicKey(p1[0:], p2[0:]);
+            } else if (str.equals(kty, "RSA") && jwkBytes(k, "n", &p1) && jwkBytes(k, "e", &p2)) {
+                found = crypto.rsaPublicKey(p1[0:], p2[0:]);
+            } else if (str.equals(kty, "OKP") && str.equals(member(k, "crv", &bad), "Ed25519") &&
+                       jwkBytes(k, "x", &p1)) {
+                found = crypto.ed25519PublicKey(p1[0:]);
+            }
+        } catch {
+            found = null;
+        }
+        p1.free();
+        p2.free();
+    }
+    json.release(j);
+    if (!found) { throw(ERR_KEY, "jwt: no usable key with kid \"%.*s\" in the JWKS", kid.len, kid.ptr); }
+    return found;
+}

@@ -308,3 +308,36 @@ void testJweRefused(testing.T *t) {
     p256.free();
     p384.free();
 }
+
+/* jwksKey: the recipient's key from their JWKS, use "enc" too */
+void testJwksKey(testing.T *t) {
+    ad String text = file("jwks.json");
+    crypto.Key *enc1 = jwksKey(text[0:], "enc1");        /* RSA, "use": "enc" */
+    crypto.Key *e384 = jwksKey(text[0:], "ec384");
+    crypto.Key *ed = jwksKey(text[0:], "ed1");
+    t.check(enc1.kind() == crypto.KeyKind.rsa && e384.kind() == crypto.KeyKind.ec384 &&
+            ed.kind() == crypto.KeyKind.ed25519, "keys of three kinds");
+    /* encrypt to it; the private key decrypts */
+    ad String rsaPem = file("rsa-key.pem");
+    crypto.Key *priv = crypto.privateKey(rsaPem[0:]);
+    ad Encrypter *x = rsaOaep256(Enc.a256gcm, enc1);
+    ad Verifier *v = verifier();
+    v.rsaOaep256(priv);
+    v.hs256(SECRET);
+    v.now = NOW;
+    ad Signer *s = hs256(SECRET);
+    ad Claims c = claims("k", NOW + 60);
+    ad String jws = s.sign(c);
+    ad String tok = x.encryptToken(jws[0:]);
+    t.equal(code(v, tok[0:]), 0);
+    bool threw = false;
+    try { crypto.Key *k = jwksKey(text[0:], "nope"); k.free(); } catch (Error e) { threw = e.code == ERR_KEY; }
+    t.check(threw, "an unknown kid throws ERR_KEY");
+    threw = false;
+    try { crypto.Key *k = jwksKey(text[0:], "sym"); k.free(); } catch (Error e) { threw = e.code == ERR_KEY; }
+    t.check(threw, "an oct key throws ERR_KEY");
+    enc1.free();
+    e384.free();
+    ed.free();
+    priv.free();
+}
