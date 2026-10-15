@@ -100,60 +100,127 @@ void testRfc7515Hs256(testing.T *t) {
     key.free();
 }
 
+/* a key of the kind alg i signs with: 0-2 HS, then ES256, ES384,
+ * ES512, RS256-512, PS256-512, EdDSA */
+crypto.Key *keyFor(i64 i, crypto.Key *rsa) {
+    if (i == 3) { return crypto.generateKey(); }
+    if (i == 4) { return crypto.generateKey(crypto.KeyKind.ec384); }
+    if (i == 5) { return crypto.generateKey(crypto.KeyKind.ec521); }
+    if (i == 12) { return crypto.generateKey(crypto.KeyKind.ed25519); }
+    return rsa;
+}
+
+Signer *signerFor(i64 i, crypto.Key *k) {
+    if (i == 0) { return hs256(SECRET); }
+    if (i == 1) { return hs384(SECRET); }
+    if (i == 2) { return hs512(SECRET); }
+    if (i == 3) { return es256(k); }
+    if (i == 4) { return es384(k); }
+    if (i == 5) { return es512(k); }
+    if (i == 6) { return rs256(k); }
+    if (i == 7) { return rs384(k); }
+    if (i == 8) { return rs512(k); }
+    if (i == 9) { return ps256(k); }
+    if (i == 10) { return ps384(k); }
+    if (i == 11) { return ps512(k); }
+    return eddsa(k);
+}
+
+void trustFor(Verifier *v, i64 i, crypto.Key *k, u8[] secret) {
+    if (i == 0) { v.hs256(secret); }
+    if (i == 1) { v.hs384(secret); }
+    if (i == 2) { v.hs512(secret); }
+    if (i == 3) { v.es256(k); }
+    if (i == 4) { v.es384(k); }
+    if (i == 5) { v.es512(k); }
+    if (i == 6) { v.rs256(k); }
+    if (i == 7) { v.rs384(k); }
+    if (i == 8) { v.rs512(k); }
+    if (i == 9) { v.ps256(k); }
+    if (i == 10) { v.ps384(k); }
+    if (i == 11) { v.ps512(k); }
+    if (i == 12) { v.eddsa(k); }
+}
+
 /* every algorithm signs and verifies, and refuses another key */
 void testRoundTrips(testing.T *t) {
     ad String rsaPem = file("rsa-key.pem");
     crypto.Key *rsa = crypto.privateKey(rsaPem[0:]);
-    crypto.Key *ec = crypto.generateKey();
-    crypto.Key *ec2 = crypto.generateKey();
     crypto.Key *rsa2 = crypto.generateRsaKey();
-    Signer *signers[7];
-    signers[0] = hs256(SECRET);
-    signers[1] = hs384(SECRET);
-    signers[2] = hs512(SECRET);
-    signers[3] = es256(ec);
-    signers[4] = rs256(rsa);
-    signers[5] = rs384(rsa);
-    signers[6] = rs512(rsa);
-    u8 *names[7] = {"HS256", "HS384", "HS512", "ES256", "RS256", "RS384", "RS512"};
+    u8 *names[13] = {"HS256", "HS384", "HS512", "ES256", "ES384", "ES512", "RS256", "RS384", "RS512",
+                     "PS256", "PS384", "PS512", "EdDSA"};
+    i64 sigLen[13] = {32, 48, 64, 64, 96, 132, 256, 256, 256, 256, 256, 256, 64};
     ad Claims c = claims("7", NOW + 60);
-    for (i64 i = 0; i < 7; i++) {
+    for (i64 i = 0; i < 13; i++) {
+        crypto.Key *k = keyFor(i, rsa);
+        crypto.Key *k2 = i >= 6 && i <= 11 ? rsa2 : keyFor(i, rsa);
+        Signer *s = signerFor(i, k);
         ad Verifier *v = verifier();
         v.now = NOW;
-        if (i == 0) { v.hs256(SECRET); }
-        if (i == 1) { v.hs384(SECRET); }
-        if (i == 2) { v.hs512(SECRET); }
-        if (i == 3) { v.es256(ec); }
-        if (i == 4) { v.rs256(rsa); }
-        if (i == 5) { v.rs384(rsa); }
-        if (i == 6) { v.rs512(rsa); }
-        ad String tok = signers[i].sign(c);
+        trustFor(v, i, k, SECRET);
+        ad String tok = s.sign(c);
         ad Header h = header(tok[0:]);
         t.equal(h.alg, cstrView(names[i]));
-        t.equal(h.typ, "JWT");
+        Parts p;
+        split(tok[0:], &p);
+        t.check(p.sig.len == sigLen[i], "%s: a %d-byte signature (%d)", names[i], sigLen[i], p.sig.len);
+        partsFree(&p);
         Claims back = v.verify<Claims>(tok[0:]);
         t.check(str.equals(back.sub[0:], "7") && back.exp == NOW + 60, "%s: the claims come back", names[i]);
         json.free(reflect.of(back));
-
         /* the same alg, another key */
         ad Verifier *other = verifier();
         other.now = NOW;
-        u8[] otherSecret = "another secret, also 32 bytes...";
-        if (i == 0) { other.hs256(otherSecret); }
-        if (i == 1) { other.hs384(otherSecret); }
-        if (i == 2) { other.hs512(otherSecret); }
-        if (i == 3) { other.es256(ec2); }
-        if (i == 4) { other.rs256(rsa2); }
-        if (i == 5) { other.rs384(rsa2); }
-        if (i == 6) { other.rs512(rsa2); }
+        trustFor(other, i, k2, "another secret, also 32 bytes...");
         t.check(code(other, tok[0:]) == ERR_SIGNATURE, "%s: another key refuses it", names[i]);
         json.free(reflect.of(h));
+        s.free();
+        if (k != rsa) { k.free(); }
+        if (k2 != rsa && k2 != rsa2) { k2.free(); }
     }
-    for (i64 i = 0; i < 7; i++) { signers[i].free(); }
+    /* PS is randomised, EdDSA and ES deterministic */
+    Signer *ps = ps256(rsa);
+    ad String p1 = ps.sign(c);
+    ad String p2 = ps.sign(c);
+    t.check(!str.equals(p1[0:], p2[0:]), "two PS256 tokens of the same claims differ");
+    ps.free();
+    /* a Signer refuses a key of another kind */
+    crypto.Key *ed = crypto.generateKey(crypto.KeyKind.ed25519);
+    crypto.Key *ec = crypto.generateKey();
+    bool threw = false;
+    try { Signer *x = es384(ec); x.free(); } catch (Error e) { threw = e.code == ERR_KEY; }
+    t.check(threw, "es384 with a P-256 key throws ERR_KEY");
+    threw = false;
+    try { Signer *x = ps256(ed); x.free(); } catch (Error e) { threw = e.code == ERR_KEY; }
+    t.check(threw, "ps256 with an Ed25519 key throws ERR_KEY");
+    threw = false;
+    try { Signer *x = eddsa(rsa); x.free(); } catch (Error e) { threw = e.code == ERR_KEY; }
+    t.check(threw, "eddsa with an RSA key throws ERR_KEY");
+    ed.free();
+    ec.free();
     rsa.free();
     rsa2.free();
-    ec.free();
-    ec2.free();
+}
+
+/* RFC 8037, appendix A.4: an EdDSA JWS (its payload isn't JSON, so it
+ * is checked as a signature) with the key of A.1 */
+void testRfc8037(testing.T *t) {
+    String x;
+    base64.decode("11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo", &x);
+    crypto.Key *k = crypto.ed25519PublicKey(x[0:]);
+    u8[] token = "eyJhbGciOiJFZERTQSJ9.RXhhbXBsZSBvZiBFZDI1NTE5IHNpZ25pbmc"
+                 ".hgyY0il_MGCjP0JzlnLWG1PPOt7-09PGcvMg3AIbQR6dWbhijcNR4ki4iylGjg5BhVsPt9g7sVvpAr_MuM0KAg";
+    Parts p;
+    split(token, &p);
+    t.equal(p.body, "Example of Ed25519 signing");
+    t.check(k.verify(token[0:p.head64.len + 1 + p.body64.len], p.sig[0:]), "RFC 8037 A.4 verifies");
+    VKey vk;
+    vk.alg = Alg.eddsa;
+    vk.key = k;
+    t.check(sigHolds(&vk, &p, token[0:p.head64.len + 1 + p.body64.len]), "and through the Verifier's check");
+    partsFree(&p);
+    k.free();
+    x.free();
 }
 
 /* tokens openssl signed (testdata/gen.py) verify with keys from PEM and
@@ -161,33 +228,48 @@ void testRoundTrips(testing.T *t) {
 void testOpensslTokens(testing.T *t) {
     ad String rsaPem = file("rsa-pub.pem");
     ad String ecPem = file("ec-pub.pem");
+    ad String ec384Pem = file("ec384-pub.pem");
+    ad String ec521Pem = file("ec521-pub.pem");
+    ad String edPem = file("ed-pub.pem");
     ad String jwksText = file("jwks.json");
     crypto.Key *rsa = crypto.publicKey(rsaPem[0:]);
     crypto.Key *ec = crypto.publicKey(ecPem[0:]);
+    crypto.Key *ec384k = crypto.publicKey(ec384Pem[0:]);
+    crypto.Key *ec521k = crypto.publicKey(ec521Pem[0:]);
+    crypto.Key *ed = crypto.publicKey(edPem[0:]);
     ad Verifier *v = verifier();
     v.rs256(rsa, "rsa1");
     v.rs384(rsa);
     v.rs512(rsa);
     v.es256(ec, "ec1");
+    v.es384(ec384k, "ec384");
+    v.es512(ec521k, "ec521");
+    v.ps256(rsa, "pss1");
+    v.eddsa(ed, "ed1");
     v.issuer = "https://issuer.example";
     v.audience = "api";
     ad Verifier *j = verifier();
     j.jwks(jwksText[0:]);
-    u8 *files[4] = {"rs256.jwt", "rs384.jwt", "rs512.jwt", "es256.jwt"};
-    for (i64 i = 0; i < 4; i++) {
+    u8 *files[8] = {"rs256.jwt", "rs384.jwt", "rs512.jwt", "es256.jwt", "es384.jwt", "es512.jwt", "ps256.jwt",
+                    "eddsa.jwt"};
+    for (i64 i = 0; i < 8; i++) {
         ad String tok = tokenFile(files[i]);
         Ext e = v.verify<Ext>(tok[0:]);
         t.check(str.equals(e.sub[0:], "ext") && e.aud.len == 2 && e.exp == 4102444800, "%s: claims", files[i]);
         json.free(reflect.of(e));
-        /* the JWKS has RS256 (rsa1) and ES256 (ec1) keys only */
+        /* the JWKS has RS256 (rsa1), ES256/384/512, PS256 and EdDSA keys,
+         * no RS384 or RS512 */
         i64 got = code(j, tok[0:]);
-        t.check(i == 0 || i == 3 ? got == 0 : got == ERR_ALG, "%s with the JWKS: %x", files[i], got);
+        t.check(i == 1 || i == 2 ? got == ERR_ALG : got == 0, "%s with the JWKS: %x", files[i], got);
     }
     /* ES256 is r||s: the DER form openssl makes is refused */
     ad String der = tokenFile("es256-der.jwt");
     t.equal(code(v, der[0:]), ERR_SIGNATURE);
     rsa.free();
     ec.free();
+    ec384k.free();
+    ec521k.free();
+    ed.free();
 }
 
 /* altered tokens fail */
@@ -387,7 +469,9 @@ void testJwksText(testing.T *t) {
     ad Verifier *v = verifier();
     ad String text = file("jwks.json");
     v.jwks(text[0:]);
-    t.equal(v.keys.len, 2);                   /* rsa1, ec1; oct, P-384 and use enc skipped */
+    /* rsa1, ec1, ec384, ec521, ed1, pss1; skipped: oct, a bad P-384 point,
+     * use enc, an RSA key that says HS256, a P-384 key that says ES256 */
+    t.equal(v.keys.len, 6);
     bool threw = false;
     ad Verifier *w = verifier();
     try { w.jwks("{\"keys\":[{\"kty\":\"oct\",\"k\":\"AA\"}]}"); } catch (Error e) { threw = e.code == ERR_KEY; }

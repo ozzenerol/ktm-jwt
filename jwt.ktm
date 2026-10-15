@@ -34,21 +34,27 @@ pub const i64 ERR_KEY       = 0x6A770007;  /* no key for the token's kid, a bad 
     String kid;
 };
 
-enum Alg { hs256, hs384, hs512, es256, rs256, rs384, rs512 };
+enum Alg { hs256, hs384, hs512, es256, rs256, rs384, rs512, es384, es512, ps256, ps384, ps512, eddsa };
 
 static u8 *algName(Alg a) {
     if (a == Alg.hs256) { return "HS256"; }
     if (a == Alg.hs384) { return "HS384"; }
     if (a == Alg.hs512) { return "HS512"; }
     if (a == Alg.es256) { return "ES256"; }
+    if (a == Alg.es384) { return "ES384"; }
+    if (a == Alg.es512) { return "ES512"; }
     if (a == Alg.rs256) { return "RS256"; }
     if (a == Alg.rs384) { return "RS384"; }
-    return "RS512";
+    if (a == Alg.rs512) { return "RS512"; }
+    if (a == Alg.ps256) { return "PS256"; }
+    if (a == Alg.ps384) { return "PS384"; }
+    if (a == Alg.ps512) { return "PS512"; }
+    return "EdDSA";
 }
 
 /* The Alg of a header's "alg", false for any other ("none" too) */
 static bool algOf(u8[] name, Alg *out) {
-    for (i64 i = 0; i <= (i64)Alg.rs512; i++) {
+    for (i64 i = 0; i <= (i64)Alg.eddsa; i++) {
         if (str.equals(name, cstrView(algName((Alg)i)))) {
             *out = (Alg)i;
             return true;
@@ -67,10 +73,30 @@ static bool isHmac(Alg a) {
     return a == Alg.hs256 || a == Alg.hs384 || a == Alg.hs512;
 }
 
+static bool isPss(Alg a) {
+    return a == Alg.ps256 || a == Alg.ps384 || a == Alg.ps512;
+}
+
 static crypto.Hash hashOf(Alg a) {
-    if (a == Alg.hs384 || a == Alg.rs384) { return crypto.Hash.sha384; }
-    if (a == Alg.hs512 || a == Alg.rs512) { return crypto.Hash.sha512; }
+    if (a == Alg.hs384 || a == Alg.rs384 || a == Alg.es384 || a == Alg.ps384) { return crypto.Hash.sha384; }
+    if (a == Alg.hs512 || a == Alg.rs512 || a == Alg.es512 || a == Alg.ps512) { return crypto.Hash.sha512; }
     return crypto.Hash.sha256;
+}
+
+/* The kind of key an algorithm signs with */
+static crypto.KeyKind kindOf(Alg a) {
+    if (a == Alg.es256) { return crypto.KeyKind.ec256; }
+    if (a == Alg.es384) { return crypto.KeyKind.ec384; }
+    if (a == Alg.es512) { return crypto.KeyKind.ec521; }
+    if (a == Alg.eddsa) { return crypto.KeyKind.ed25519; }
+    return crypto.KeyKind.rsa;
+}
+
+/* An ES signature's size: r||s, twice the curve's coordinate size */
+static i64 ecSigSize(Alg a) {
+    if (a == Alg.es384) { return 96; }
+    if (a == Alg.es512) { return 132; }
+    return 64;
 }
 
 /* the HMAC of data with secret, for alg a */
@@ -128,34 +154,45 @@ pub Signer *hs512(u8[] secret, u8[] kid = "") {
     return signerNew(Alg.hs512, secret, null, kid);
 }
 
-static void needKey(crypto.Key *key, crypto.KeyKind kind, u8 *what) {
-    if (!key || key.kind() != kind) { throw(ERR_KEY, "jwt: %s needs %s key", what,
-                                            kind == crypto.KeyKind.rsa ? "an RSA" : "a P-256"); }
+static u8 *kindName(crypto.KeyKind k) {
+    if (k == crypto.KeyKind.rsa) { return "an RSA"; }
+    if (k == crypto.KeyKind.ec384) { return "a P-384"; }
+    if (k == crypto.KeyKind.ec521) { return "a P-521"; }
+    if (k == crypto.KeyKind.ed25519) { return "an Ed25519"; }
+    return "a P-256";
+}
+
+/* key is the kind alg a signs with */
+static void needKey(crypto.Key *key, Alg a) {
+    crypto.KeyKind kind = kindOf(a);
+    if (!key || key.kind() != kind) { throw(ERR_KEY, "jwt: %s needs %s key", algName(a), kindName(kind)); }
+}
+
+static Signer *keySigner(Alg a, crypto.Key *key, u8[] kid) {
+    needKey(key, a);
+    return signerNew(a, "", key, kid);
 }
 
 /* ES256: ECDSA P-256 with key, a private one; it stays yours (keep it
- * while the Signer is used) */
-pub Signer *es256(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.ec256, "ES256");
-    return signerNew(Alg.es256, "", key, kid);
-}
+ * while the Signer is used). ES384 (P-384) and ES512 (P-521) alike. */
+pub Signer *es256(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.es256, key, kid); }
+pub Signer *es384(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.es384, key, kid); }
+pub Signer *es512(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.es512, key, kid); }
 
 /* RS256: RSA PKCS#1 v1.5 over SHA-256 with key, a private RSA one; it
- * stays yours */
-pub Signer *rs256(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS256");
-    return signerNew(Alg.rs256, "", key, kid);
-}
+ * stays yours. RS384 and RS512 alike. */
+pub Signer *rs256(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.rs256, key, kid); }
+pub Signer *rs384(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.rs384, key, kid); }
+pub Signer *rs512(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.rs512, key, kid); }
 
-pub Signer *rs384(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS384");
-    return signerNew(Alg.rs384, "", key, kid);
-}
+/* PS256: RSA-PSS over SHA-256 with key, a private RSA one (randomised:
+ * two tokens of the same claims differ). PS384 and PS512 alike. */
+pub Signer *ps256(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.ps256, key, kid); }
+pub Signer *ps384(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.ps384, key, kid); }
+pub Signer *ps512(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.ps512, key, kid); }
 
-pub Signer *rs512(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS512");
-    return signerNew(Alg.rs512, "", key, kid);
-}
+/* EdDSA: Ed25519 (RFC 8037) with key, a private Ed25519 one */
+pub Signer *eddsa(crypto.Key *key, u8[] kid = "") { return keySigner(Alg.eddsa, key, kid); }
 
 /* A token of payload (JSON text), a new String */
 static String signJson(Signer *s, u8[] payload) {
@@ -177,6 +214,10 @@ static String signJson(Signer *s, u8[] payload) {
     String sig;
     if (isHmac(s.alg)) {
         sig = hmac(s.alg, s.secret[0:], token[0:]);
+    } else if (s.alg == Alg.eddsa) {
+        sig = s.key.sign(token[0:]);
+    } else if (isPss(s.alg)) {
+        sig = s.key.signPss(hashOf(s.alg), token[0:]);
     } else {
         sig = s.key.signWith(hashOf(s.alg), token[0:]);
     }
@@ -359,27 +400,24 @@ pub void Verifier.hs512(u8[] secret, u8[] kid = "") {
     self.keys.push(vkeyNew(Alg.hs512, kid, secret, null, false));
 }
 
+static void keyTrust(Verifier *v, Alg a, crypto.Key *key, u8[] kid) {
+    needKey(key, a);
+    v.keys.push(vkeyNew(a, kid, "", key, false));
+}
+
 /* Trust ES256 tokens signed by key's private key (key, public or
- * private, stays yours: keep it while the Verifier is used) */
-pub void Verifier.es256(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.ec256, "ES256");
-    self.keys.push(vkeyNew(Alg.es256, kid, "", key, false));
-}
-
-pub void Verifier.rs256(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS256");
-    self.keys.push(vkeyNew(Alg.rs256, kid, "", key, false));
-}
-
-pub void Verifier.rs384(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS384");
-    self.keys.push(vkeyNew(Alg.rs384, kid, "", key, false));
-}
-
-pub void Verifier.rs512(crypto.Key *key, u8[] kid = "") {
-    needKey(key, crypto.KeyKind.rsa, "RS512");
-    self.keys.push(vkeyNew(Alg.rs512, kid, "", key, false));
-}
+ * private, stays yours: keep it while the Verifier is used); the others
+ * alike, each for its kind of key */
+pub void Verifier.es256(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.es256, key, kid); }
+pub void Verifier.es384(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.es384, key, kid); }
+pub void Verifier.es512(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.es512, key, kid); }
+pub void Verifier.rs256(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.rs256, key, kid); }
+pub void Verifier.rs384(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.rs384, key, kid); }
+pub void Verifier.rs512(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.rs512, key, kid); }
+pub void Verifier.ps256(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.ps256, key, kid); }
+pub void Verifier.ps384(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.ps384, key, kid); }
+pub void Verifier.ps512(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.ps512, key, kid); }
+pub void Verifier.eddsa(crypto.Key *key, u8[] kid = "") { keyTrust(self, Alg.eddsa, key, kid); }
 
 /* the bytes of a JWK member in base64url, false when missing or bad */
 static bool jwkBytes(json.Value *k, u8[] name, String *out) {
@@ -399,18 +437,37 @@ static VKey *jwkKey(json.Value *k) {
     if (bad || (use.len && !str.equals(use, "sig"))) { return null; }
     Alg a;
     if (alg.len && !algOf(alg, &a)) { return null; }
+    /* an HMAC secret is never a JWK of a public key: no "alg": "HS256"
+     * on an RSA or EC key (an empty secret anyone could sign with) */
+    if (alg.len && isHmac(a)) { return null; }
     crypto.Key *key = null;
     String p1, p2;
+    bool b2 = false;
+    u8[] crv = member(k, "crv", &b2);
     try {
         if (str.equals(kty, "EC")) {
-            bool b2 = false;
-            if (!str.equals(member(k, "crv", &b2), "P-256") || (alg.len && a != Alg.es256)) { return null; }
-            a = Alg.es256;
+            /* the curve says the algorithm; "alg", when there, must agree */
+            Alg ca;
+            if (str.equals(crv, "P-256")) { ca = Alg.es256; }
+            else if (str.equals(crv, "P-384")) { ca = Alg.es384; }
+            else if (str.equals(crv, "P-521")) { ca = Alg.es512; }
+            else { return null; }
+            if (alg.len && a != ca) { return null; }
+            a = ca;
             if (jwkBytes(k, "x", &p1) && jwkBytes(k, "y", &p2)) { key = crypto.ecPublicKey(p1[0:], p2[0:]); }
+            if (key && key.kind() != kindOf(a)) {      /* x and y of another curve's size */
+                key.free();
+                key = null;
+            }
         } else if (str.equals(kty, "RSA")) {
             if (!alg.len) { a = Alg.rs256; }    /* RS256 when the JWK doesn't say */
-            if (a != Alg.rs256 && a != Alg.rs384 && a != Alg.rs512) { return null; }
+            if (kindOf(a) != crypto.KeyKind.rsa) { return null; }
             if (jwkBytes(k, "n", &p1) && jwkBytes(k, "e", &p2)) { key = crypto.rsaPublicKey(p1[0:], p2[0:]); }
+        } else if (str.equals(kty, "OKP")) {
+            /* RFC 8037: Ed25519 only (no Ed448, no X25519 for signing) */
+            if (!str.equals(crv, "Ed25519") || (alg.len && a != Alg.eddsa)) { return null; }
+            a = Alg.eddsa;
+            if (jwkBytes(k, "x", &p1)) { key = crypto.ed25519PublicKey(p1[0:]); }
         }
     } catch {
         key = null;
@@ -550,8 +607,10 @@ static bool sigHolds(VKey *k, Parts *p, u8[] signedPart) {
         mac.free();
         return ok;
     }
-    /* ES256 is r||s, 64 bytes: never the DER form */
-    if (k.alg == Alg.es256 && p.sig.len != 64) { return false; }
+    if (k.alg == Alg.eddsa) { return k.key.verify(signedPart, p.sig[0:]); }
+    if (isPss(k.alg)) { return k.key.verifyPss(hashOf(k.alg), signedPart, p.sig[0:]); }
+    /* ES is r||s, 64, 96 or 132 bytes: never the DER form */
+    if (kindOf(k.alg) != crypto.KeyKind.rsa && p.sig.len != ecSigSize(k.alg)) { return false; }
     return k.key.verifyWith(hashOf(k.alg), signedPart, p.sig[0:]);
 }
 
